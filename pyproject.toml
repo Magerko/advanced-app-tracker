@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "advanced-app-tracker"
+version = "1.0.0"
+description = "Desktop application-usage tracker with limits, productivity stats and self-control (guardian) features."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "PyQt6>=6.6",
+    "psutil>=5.9",
+    "pyqtgraph>=0.13",
+    "matplotlib>=3.7",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+full = ["pynput>=1.7", "bcrypt>=4.0", "pygetwindow>=0.0.9"]
+
+[project.scripts]
+app-tracker = "app_tracker.__main__:main"
+
+[tool.setuptools]
+packages = [
+    "app_tracker",
+    "app_tracker.core",
+    "app_tracker.platform_support",
+    "app_tracker.security",
+    "app_tracker.ui",
+    "app_tracker.utils",
+    "app_tracker.resources",
+]
+
+[tool.setuptools.package-data]
+"app_tracker.resources" = ["*.png"]
