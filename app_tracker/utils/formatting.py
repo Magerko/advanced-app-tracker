@@ -19,7 +19,6 @@ def format_duration(seconds: Optional[int]) -> str:
     return f"{seconds // 3600}ч {(seconds % 3600) // 60}м"
 
 
-# Multipliers for the suffix accepted by :func:`parse_time_input`.
 _UNIT_SECONDS = {
     "ч": 3600, "h": 3600,
     "м": 60, "m": 60,
@@ -28,10 +27,9 @@ _UNIT_SECONDS = {
 
 
 def parse_time_input(text: str) -> Optional[int]:
-    """Parse a duration string such as ``"1ч 30м"`` or ``"45m"``.
+    """Parse a duration like ``"1ч 30м"`` or ``"45m"`` into seconds.
 
-    Returns the total number of seconds, ``0`` for an empty string, or
-    ``None`` if any part of the input could not be understood.
+    Returns ``0`` for an empty string and ``None`` if anything can't be parsed.
     """
     if not text:
         return 0
@@ -43,7 +41,7 @@ def parse_time_input(text: str) -> Optional[int]:
         if unit in _UNIT_SECONDS:
             number, multiplier = part[:-1], _UNIT_SECONDS[unit]
         else:
-            number, multiplier = part, 1  # bare number == seconds
+            number, multiplier = part, 1
         try:
             total += int(number) * multiplier
         except ValueError:
@@ -54,7 +52,6 @@ def parse_time_input(text: str) -> Optional[int]:
 
 
 def friendly_app_name(process_name: Optional[str], executable_path: Optional[str]) -> str:
-    """Derive a human-friendly application name from an executable path."""
     if not executable_path:
         return process_name or "Неизвестно"
     stem, _ = os.path.splitext(os.path.basename(executable_path))

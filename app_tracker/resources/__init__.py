@@ -7,5 +7,4 @@ APP_ICON_PATH = RESOURCES_DIR / "app_icon.png"
 
 
 def app_icon_file() -> str:
-    """Absolute path to the bundled application icon (may not exist)."""
     return str(APP_ICON_PATH)

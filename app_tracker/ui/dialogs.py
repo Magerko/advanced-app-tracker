@@ -111,7 +111,7 @@ class PasswordChangeDialog(QDialog):
                 return
 
         new_pwd = self.new_input.text()
-        if not new_pwd:  # empty -> offer to remove an existing password
+        if not new_pwd:  # empty input offers to drop an existing password
             if self.has_password:
                 reply = QMessageBox.question(
                     self, "Удалить пароль", "Удалить пароль на выход?",
@@ -225,7 +225,7 @@ class SettingsDialog(QDialog):
             self.password_cb.setChecked(False)
 
     def accept(self) -> None:
-        # A password requirement is meaningless without a stored password.
+        # Requiring a password makes no sense without one stored.
         if self.password_cb.isChecked() and self.db.get_setting(SETTING_PASSWORD_HASH) is None:
             QMessageBox.warning(self, "Нет пароля", "Сначала установите пароль на выход.")
             return

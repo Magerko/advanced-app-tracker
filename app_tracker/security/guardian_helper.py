@@ -4,14 +4,12 @@ Run as::
 
     python -m app_tracker.security.guardian_helper <main_pid> <create_time> <signal_file>
 
-Watches the main application and relaunches it if it dies unexpectedly. See
-:mod:`app_tracker.security.guardian` for the design and safety guarantees.
+Watches the main application and relaunches it if it dies unexpectedly.
 """
 
 from __future__ import annotations
 
 import logging
-import os
 import subprocess
 import sys
 import time
@@ -35,11 +33,10 @@ _RELAUNCH_HISTORY = data_dir() / "guardian_relaunch.history"
 
 
 def _main_is_alive(pid: int, create_time: float) -> bool:
-    """True if ``pid`` exists and is the *same* process we started watching."""
     try:
         proc = psutil.Process(pid)
         if create_time and abs(proc.create_time() - create_time) > _CREATE_TIME_TOLERANCE_S:
-            return False  # PID was reused by a different process
+            return False  # the PID was reused by a different process
         return proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE
     except (psutil.NoSuchProcess, psutil.AccessDenied):
         return False
@@ -72,7 +69,6 @@ def _record_relaunch(history: list[float]) -> None:
 
 
 def _relaunch() -> bool:
-    """Relaunch the app unless the back-off limit was hit. Returns success."""
     history = _recent_relaunches()
     if len(history) >= GUARDIAN_MAX_RELAUNCHES:
         log.error(
@@ -101,7 +97,6 @@ def _relaunch() -> bool:
 
 
 def _consume_signal(signal_file: Path) -> bool:
-    """If the clean-shutdown signal is present, remove it and return True."""
     if signal_file.exists():
         try:
             signal_file.unlink()
@@ -125,7 +120,7 @@ def run(main_pid: int, create_time: float, signal_file: Path) -> int:
                 return 0
             log.warning("Main process %s vanished unexpectedly.", main_pid)
             _relaunch()
-            # The relaunched app starts its own guardian, so we exit either way.
+            # The relaunched app spawns its own guardian, so we exit either way.
             return 0
 
         time.sleep(GUARDIAN_POLL_INTERVAL_SECONDS)
@@ -146,7 +141,7 @@ def main(argv: list[str] | None = None) -> int:
     signal_file = Path(argv[2])
     try:
         return run(main_pid, create_time, signal_file)
-    except KeyboardInterrupt:  # pragma: no cover
+    except KeyboardInterrupt:
         return 0
 
 

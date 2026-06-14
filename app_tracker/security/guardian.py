@@ -1,21 +1,11 @@
 """The guardian: an opt-in anti-kill watchdog.
 
-A small helper process watches the main application's PID. If the application
-disappears *without* having requested a clean shutdown, the helper relaunches
-it. This is the core "self-control" feature: closing the app normally requires
-the exit password, and killing it from Task Manager simply brings it back.
+A small helper process watches the main app's PID and relaunches it if it dies
+without first writing a clean-shutdown signal. The in-app side here manages that
+helper; the watching loop lives in guardian_helper.py.
 
-Safety is built in:
-
-* A **clean shutdown is always honoured** - on a legitimate exit the main app
-  writes a signal file and the helper exits without relaunching.
-* PID reuse is guarded by comparing the process **create time**.
-* A relaunch **back-off** (``GUARDIAN_MAX_RELAUNCHES`` within
-  ``GUARDIAN_RELAUNCH_WINDOW_SECONDS``) prevents crash-loops from spinning up
-  endless processes.
-
-This class is the in-app *manager*; the watching loop lives in
-:mod:`app_tracker.security.guardian_helper`.
+A clean exit is always honoured, PID reuse is guarded by process create time,
+and a relaunch back-off prevents crash-loops.
 """
 
 from __future__ import annotations
@@ -45,9 +35,7 @@ class Guardian(QObject):
         self._timer.timeout.connect(self._ensure_alive)
         self._stopping = False
 
-    # -- lifecycle ------------------------------------------------------------
     def start(self) -> None:
-        """Clear any stale shutdown signal and spawn the helper."""
         self._stopping = False
         signal_file = guardian_signal_path()
         try:
@@ -59,10 +47,9 @@ class Guardian(QObject):
         self._timer.start(WATCHDOG_CHECK_INTERVAL_MS)
 
     def stop(self) -> None:
-        """Request a clean shutdown: signal the helper and terminate it."""
         self._stopping = True
         self._timer.stop()
-        # Tell the helper "this exit is intentional, do not relaunch".
+        # Signal that this exit is intentional, so the helper won't relaunch.
         try:
             guardian_signal_path().write_text("shutdown", encoding="utf-8")
         except OSError as exc:
@@ -72,7 +59,6 @@ class Guardian(QObject):
             self._terminate_helper()
         log.info("Guardian stopped.")
 
-    # -- internals ------------------------------------------------------------
     def _spawn_helper(self) -> None:
         try:
             create_time = psutil.Process(os.getpid()).create_time()
@@ -107,7 +93,6 @@ class Guardian(QObject):
             self._helper = None
 
     def _ensure_alive(self) -> None:
-        """Restart the helper if it exited while we are still running."""
         if self._stopping:
             return
         if self._helper is None or self._helper.poll() is not None:

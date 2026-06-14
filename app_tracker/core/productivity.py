@@ -1,8 +1,6 @@
 """Productivity classification of applications.
 
 The integer values are persisted in the database, so they must stay stable.
-``IntEnum`` lets the values be used interchangeably with the raw ints that
-come back from SQLite.
 """
 
 from __future__ import annotations
@@ -37,13 +35,12 @@ _LABELS = {
     Productivity.UNPRODUCTIVE: "Непродуктивно",
 }
 
-# Background colours used in tables (RGB). Tuned for the dark theme.
+# Row background colours (RGB), tuned for the dark theme.
 _COLORS = {
-    Productivity.PRODUCTIVE: (180, 255, 180),    # light green
-    Productivity.UNPRODUCTIVE: (255, 180, 180),  # light red
-    Productivity.UNKNOWN: (100, 100, 100),       # dark grey
+    Productivity.PRODUCTIVE: (180, 255, 180),
+    Productivity.UNPRODUCTIVE: (255, 180, 180),
+    Productivity.UNKNOWN: (100, 100, 100),
 }
 
-# Convenience aliases kept for readability at call sites.
 PRODUCTIVITY_MAP = _LABELS
 PRODUCTIVITY_COLORS = _COLORS

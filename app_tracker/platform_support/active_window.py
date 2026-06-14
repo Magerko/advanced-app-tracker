@@ -1,8 +1,7 @@
 """Cross-platform detection of the current foreground window.
 
-Each platform has a dedicated implementation; a :mod:`pygetwindow` based
-fallback (title only) is used when the native path is unavailable. Callers get
-``None`` when nothing useful can be determined.
+Each platform has a native implementation, with a pygetwindow (title-only)
+fallback. Callers get ``None`` when nothing useful can be determined.
 """
 
 from __future__ import annotations
@@ -26,13 +25,11 @@ class ActiveWindowInfo(NamedTuple):
 
 try:
     import pygetwindow as _gw
-except Exception:  # pragma: no cover - optional dependency
+except Exception:
     _gw = None
 
 
-# --------------------------------------------------------------------------- #
 # Windows
-# --------------------------------------------------------------------------- #
 _win_user32 = None
 if sys.platform == "win32":
     try:
@@ -49,7 +46,7 @@ if sys.platform == "win32":
             wintypes.HWND, ctypes.POINTER(wintypes.DWORD)
         ]
         _win_user32.GetWindowThreadProcessId.restype = wintypes.DWORD
-    except (AttributeError, OSError) as exc:  # pragma: no cover
+    except (AttributeError, OSError) as exc:
         log.warning("Windows window APIs unavailable: %s", exc)
         _win_user32 = None
 
@@ -79,9 +76,7 @@ def _active_window_windows() -> Optional[ActiveWindowInfo]:
         return None
 
 
-# --------------------------------------------------------------------------- #
 # macOS
-# --------------------------------------------------------------------------- #
 _macos_ok = False
 if sys.platform == "darwin":
     try:
@@ -89,7 +84,7 @@ if sys.platform == "darwin":
         import Quartz  # noqa: F401
 
         _macos_ok = True
-    except ImportError:  # pragma: no cover
+    except ImportError:
         log.warning("macOS window APIs unavailable (pyobjc not installed).")
 
 
@@ -119,22 +114,19 @@ def _active_window_macos() -> Optional[ActiveWindowInfo]:
                     if candidate:
                         title = candidate
                         break
-        except Exception:  # pragma: no cover
+        except Exception:
             pass
         return ActiveWindowInfo(pid, name, exe, title)
-    except (psutil.NoSuchProcess, psutil.AccessDenied, Exception) as exc:  # pragma: no cover
+    except (psutil.NoSuchProcess, psutil.AccessDenied, Exception) as exc:
         log.debug("macOS active window lookup failed: %s", exc)
         return None
 
 
-# --------------------------------------------------------------------------- #
 # Linux (X11)
-# --------------------------------------------------------------------------- #
 _x11 = None
 if sys.platform.startswith("linux") and "WAYLAND_DISPLAY" not in os.environ:
     try:
-        from Xlib import X, display
-        from Xlib.error import XError
+        from Xlib import display
 
         _x11_display = display.Display()
         _x11 = {
@@ -145,7 +137,7 @@ if sys.platform.startswith("linux") and "WAYLAND_DISPLAY" not in os.environ:
             "name": _x11_display.intern_atom("_NET_WM_NAME"),
             "utf8": _x11_display.intern_atom("UTF8_STRING"),
         }
-    except Exception as exc:  # pragma: no cover
+    except Exception as exc:
         log.warning("X11 window APIs unavailable: %s", exc)
         _x11 = None
 
@@ -177,7 +169,7 @@ def _active_window_linux() -> Optional[ActiveWindowInfo]:
             name, exe = proc.name(), proc.exe()
         disp.sync()
         return ActiveWindowInfo(pid, name, exe, title)
-    except (psutil.NoSuchProcess, psutil.AccessDenied, Exception) as exc:  # pragma: no cover
+    except (psutil.NoSuchProcess, psutil.AccessDenied, Exception) as exc:
         log.debug("X11 active window lookup failed: %s", exc)
         return None
 
@@ -189,7 +181,7 @@ def _active_window_fallback() -> Optional[ActiveWindowInfo]:
         window = _gw.getActiveWindow()
         if window and getattr(window, "title", None):
             return ActiveWindowInfo(None, None, None, window.title)
-    except Exception:  # pragma: no cover
+    except Exception:
         pass
     return None
 
@@ -211,6 +203,6 @@ def get_active_window_info() -> Optional[ActiveWindowInfo]:
     if info and info.executable_path:
         try:
             info = info._replace(executable_path=os.path.normpath(info.executable_path))
-        except Exception:  # pragma: no cover
+        except Exception:
             pass
     return info

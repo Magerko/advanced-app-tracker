@@ -1,7 +1,7 @@
-"""The "Графики" tab: a matplotlib pie chart plus a pyqtgraph daily-trend bar.
+"""The "Графики" tab: a matplotlib pie chart and a pyqtgraph daily-trend bar.
 
-Both plotting backends are optional; if either is missing its half of the tab
-shows an explanatory placeholder instead of crashing the app.
+Both backends are optional; a missing one shows a placeholder instead of
+crashing the tab.
 """
 
 from __future__ import annotations
@@ -63,7 +63,6 @@ class GraphWidget(QWidget):
         layout.addLayout(charts)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-    # -- construction helpers -------------------------------------------------
     def _build_date_controls(self) -> QHBoxLayout:
         row = QHBoxLayout()
         self.start_date_edit = QDateEdit(calendarPopup=True)
@@ -127,7 +126,6 @@ class GraphWidget(QWidget):
             box.addWidget(placeholder)
         return panel
 
-    # -- refresh --------------------------------------------------------------
     def showEvent(self, event):
         super().showEvent(event)
         if not self._loaded_once:

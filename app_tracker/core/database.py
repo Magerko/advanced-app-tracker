@@ -1,9 +1,8 @@
 """SQLite persistence layer.
 
-A single :class:`DatabaseManager` instance is created in ``app.py`` and passed
-explicitly to everything that needs it (dependency injection). One connection
-is shared between the UI thread and the tracker thread; every access is
-serialised through an internal lock, which is safe for this workload.
+A single DatabaseManager is created in app.py and passed to everything that
+needs it. One connection is shared between the UI thread and the tracker
+thread, serialised through an internal lock.
 """
 
 from __future__ import annotations
@@ -11,7 +10,6 @@ from __future__ import annotations
 import logging
 import os
 import sqlite3
-from collections import defaultdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from threading import RLock
@@ -32,6 +30,25 @@ log = logging.getLogger(__name__)
 Row = Tuple[Any, ...]
 
 
+# Python 3.12 deprecated the implicit datetime/date sqlite3 adapters, so we
+# register explicit ISO-format ones (same on-disk format as before).
+def _adapt_datetime(value: datetime) -> str:
+    return value.isoformat(sep=" ")
+
+
+def _adapt_date(value: date) -> str:
+    return value.isoformat()
+
+
+def _convert_timestamp(raw: bytes) -> datetime:
+    return datetime.fromisoformat(raw.decode())
+
+
+sqlite3.register_adapter(datetime, _adapt_datetime)
+sqlite3.register_adapter(date, _adapt_date)
+sqlite3.register_converter("timestamp", _convert_timestamp)
+
+
 class DatabaseManager:
     """Thread-safe wrapper around the application's SQLite database."""
 
@@ -43,7 +60,6 @@ class DatabaseManager:
         self._create_schema()
         log.info("Database ready at %s", self.db_path)
 
-    # -- connection / schema --------------------------------------------------
     def _connect(self) -> None:
         self.conn = sqlite3.connect(
             self.db_path,
@@ -97,9 +113,10 @@ class DatabaseManager:
                 only_if_absent=True,
             )
 
-    # -- low-level query helpers ---------------------------------------------
     def _execute(self, query: str, params: Sequence[Any] = ()) -> Optional[sqlite3.Cursor]:
         with self._lock:
+            if self.conn is None:
+                return None
             try:
                 cur = self.conn.cursor()
                 cur.execute(query, params)
@@ -115,6 +132,8 @@ class DatabaseManager:
 
     def _fetch_one(self, query: str, params: Sequence[Any] = ()) -> Optional[Row]:
         with self._lock:
+            if self.conn is None:
+                return None
             try:
                 cur = self.conn.cursor()
                 cur.execute(query, params)
@@ -125,6 +144,8 @@ class DatabaseManager:
 
     def _fetch_all(self, query: str, params: Sequence[Any] = ()) -> List[Row]:
         with self._lock:
+            if self.conn is None:
+                return []
             try:
                 cur = self.conn.cursor()
                 cur.execute(query, params)
@@ -133,7 +154,6 @@ class DatabaseManager:
                 log.error("DB read failed: %s | query=%s", exc, query)
                 return []
 
-    # -- applications ---------------------------------------------------------
     def get_or_create_app(
         self, name: str, executable_path: str,
         productivity: Productivity = Productivity.UNKNOWN,
@@ -172,7 +192,6 @@ class DatabaseManager:
             "SELECT id, name, executable_path, productivity FROM applications ORDER BY name ASC"
         )
 
-    # -- usage log ------------------------------------------------------------
     def start_usage_log(self, app_id: int) -> Optional[int]:
         if not app_id:
             return None
@@ -200,7 +219,7 @@ class DatabaseManager:
                 (end_time, duration, log_id),
             )
         else:
-            # Discard sub-second blips so they do not clutter the log.
+            # Drop sub-second blips instead of logging them.
             self._execute("DELETE FROM usage_log WHERE id = ?", (log_id,))
 
     def get_log_start_time(self, log_id: int) -> Optional[datetime]:
@@ -209,7 +228,6 @@ class DatabaseManager:
         )
         return row[0] if row and isinstance(row[0], datetime) else None
 
-    # -- summaries / reports --------------------------------------------------
     def get_usage_summary(self) -> Dict[int, Dict[str, Any]]:
         """Per-application totals for today and the current week."""
         today = date.today()
@@ -277,7 +295,6 @@ class DatabaseManager:
             result.append({"date": day, "seconds": by_date.get(day.strftime(DATE_FORMAT), 0)})
         return result
 
-    # -- limits ---------------------------------------------------------------
     def get_all_limits(self) -> Dict[int, Dict[str, Optional[int]]]:
         rows = self._fetch_all(
             "SELECT app_id, daily_limit_seconds, weekly_limit_seconds FROM limits"
@@ -295,7 +312,6 @@ class DatabaseManager:
             ),
         )
 
-    # -- settings -------------------------------------------------------------
     def get_setting(self, key: str, default: Any = None) -> Any:
         row = self._fetch_one("SELECT value FROM settings WHERE key = ?", (key,))
         if not row:
@@ -306,7 +322,7 @@ class DatabaseManager:
                 return value.decode("utf-8") if isinstance(value, bytes) else str(value)
             except (UnicodeDecodeError, AttributeError):
                 return default
-        return value  # raw bytes (e.g. password hash)
+        return value
 
     def get_bool(self, key: str, default: bool = False) -> bool:
         value = self.get_setting(key, str(default))
@@ -331,7 +347,6 @@ class DatabaseManager:
     def set_bool(self, key: str, value: bool) -> None:
         self.set_setting(key, str(bool(value)))
 
-    # -- lifecycle ------------------------------------------------------------
     def close(self) -> None:
         with self._lock:
             if self.conn is not None:

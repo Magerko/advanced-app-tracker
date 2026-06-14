@@ -1,8 +1,4 @@
-"""Generate app_tracker/resources/app_icon.png.
-
-A small, dependency-light utility so the bundled icon can be regenerated.
-Run with: python tools/make_icon.py
-"""
+"""Regenerate app_tracker/resources/app_icon.png. Run: python tools/make_icon.py"""
 
 import os
 import sys
@@ -10,7 +6,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PyQt6.QtCore import QPointF, QRectF, Qt
-from PyQt6.QtGui import QBrush, QColor, QFont, QImage, QLinearGradient, QPainter, QPen
+from PyQt6.QtGui import QBrush, QColor, QImage, QLinearGradient, QPainter, QPen
 from PyQt6.QtWidgets import QApplication
 
 from app_tracker.resources import APP_ICON_PATH
@@ -52,7 +48,7 @@ def render() -> QImage:
 
 
 def main() -> None:
-    app = QApplication(sys.argv)  # noqa: F841 - needed for QImage/QPainter
+    app = QApplication(sys.argv)  # noqa: F841 (QPainter needs a QApplication)
     image = render()
     APP_ICON_PATH.parent.mkdir(parents=True, exist_ok=True)
     if image.save(str(APP_ICON_PATH), "PNG"):

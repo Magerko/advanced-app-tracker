@@ -71,7 +71,6 @@ class MainWindow(QMainWindow):
         if self.db.get_bool(SETTING_GUARDIAN_ENABLED):
             self._set_guardian(True)
 
-    # -- UI construction ------------------------------------------------------
     def _build_ui(self) -> None:
         central = QWidget()
         self.setCentralWidget(central)
@@ -180,7 +179,6 @@ class MainWindow(QMainWindow):
         self.tray_icon.activated.connect(self._on_tray_activated)
         self.tray_icon.show()
 
-    # -- worker thread --------------------------------------------------------
     def _start_worker(self) -> None:
         self.worker_thread = QThread(self)
         self.worker = TrackerWorker(self.db)
@@ -197,7 +195,6 @@ class MainWindow(QMainWindow):
             self.worker, method, Qt.ConnectionType.QueuedConnection, *args
         )
 
-    # -- UI updates -----------------------------------------------------------
     def _update_ui(self, usage_summary: dict, limits: dict, totals: dict) -> None:
         if self._quitting:
             return
@@ -271,7 +268,7 @@ class MainWindow(QMainWindow):
         checkbox.blockSignals(False)
 
     def _prune_table(self, summary: dict, active_id) -> None:
-        """Drop rows for apps no longer present or with zero recorded time."""
+        """Drop rows for apps no longer present or with no recorded time."""
         keep = set()
         for app_id, data in summary.items():
             if app_id == active_id:
@@ -313,7 +310,6 @@ class MainWindow(QMainWindow):
                 widget.setAutoFillBackground(True)
                 widget.setPalette(pal)
 
-    # -- productivity editing -------------------------------------------------
     def _on_productivity_toggled(self, _state: int) -> None:
         checkbox = self.sender()
         if not isinstance(checkbox, QCheckBox):
@@ -362,7 +358,6 @@ class MainWindow(QMainWindow):
                 totals["unprod_week"] += week
         self.totals = totals
 
-    # -- selection helpers ----------------------------------------------------
     def _selected_app_id(self):
         rows = self.table.selectionModel().selectedRows()
         if not rows:
@@ -391,7 +386,6 @@ class MainWindow(QMainWindow):
         if checkbox:
             checkbox.click()
 
-    # -- limit warnings -------------------------------------------------------
     def _on_limit_warning(self, app_id: int, name: str, kind: str, usage: int, limit: int) -> None:
         base_kind = kind.split("-")[0]
         is_warn = kind.endswith("-warn")
@@ -423,7 +417,6 @@ class MainWindow(QMainWindow):
         if self.tray_icon:
             self.tray_icon.setToolTip(f"{APP_NAME}\n{text}")
 
-    # -- actions --------------------------------------------------------------
     def _toggle_pause(self) -> None:
         if getattr(self.worker, "is_paused", False):
             self._invoke_worker("resume_tracking")
@@ -472,9 +465,8 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.information(self, title, message)
 
-    # -- midnight reset -------------------------------------------------------
     def _setup_midnight_timer(self) -> None:
-        self._reset_daily_warnings()  # also schedules the next reset
+        self._reset_daily_warnings()
 
     def _reset_daily_warnings(self) -> None:
         if self._quitting:
@@ -490,7 +482,6 @@ class MainWindow(QMainWindow):
         msecs = max(5000, now.msecsTo(midnight))
         QTimer.singleShot(msecs, self._reset_daily_warnings)
 
-    # -- guardian -------------------------------------------------------------
     def _set_guardian(self, enabled: bool) -> None:
         if enabled and not self._guardian_running:
             self.guardian.start()
@@ -501,7 +492,6 @@ class MainWindow(QMainWindow):
             self._guardian_running = False
             log.info("Guardian disabled.")
 
-    # -- tray / window lifecycle ---------------------------------------------
     def _on_tray_activated(self, reason) -> None:
         if reason in (
             QSystemTrayIcon.ActivationReason.Trigger,
@@ -542,6 +532,10 @@ class MainWindow(QMainWindow):
         super().changeEvent(event)
 
     def closeEvent(self, event) -> None:
+        if self._shutdown_done:
+            event.accept()
+            return
+
         if self._quitting:
             self._shutdown()
             event.accept()
@@ -554,7 +548,7 @@ class MainWindow(QMainWindow):
             self._show_close_hint()
             return
 
-        # No tray to hide into -> treat the close button as a quit request.
+        # No tray to hide into, so the close button means quit.
         if not self._confirm_exit_password():
             event.ignore()
             return
@@ -564,11 +558,11 @@ class MainWindow(QMainWindow):
         QApplication.quit()
 
     def _request_quit(self) -> None:
-        """Explicit quit (menu / tray). Verifies the exit password first."""
+        """Explicit quit from the menu or tray; checks the exit password first."""
         if not self._confirm_exit_password():
             return
         self._quitting = True
-        self.close()  # -> closeEvent sees _quitting and tears everything down
+        self.close()
 
     def _confirm_exit_password(self) -> bool:
         if not self.db.get_bool(SETTING_PASSWORD_PROTECT_EXIT):

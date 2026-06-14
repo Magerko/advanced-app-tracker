@@ -26,19 +26,19 @@ def run() -> int:
     app.setWindowIcon(app_icon())
     app.setStyle("Fusion")
     app.setPalette(build_dark_palette())
-    # Hiding the window to the tray must not quit the app; explicit quit only.
+    # Closing to the tray must not quit; we quit explicitly instead.
     app.setQuitOnLastWindowClosed(False)
 
     try:
         db = DatabaseManager()
-    except Exception as exc:  # pragma: no cover - DB init is critical
+    except Exception as exc:
         log.exception("Database initialisation failed")
         QMessageBox.critical(None, APP_NAME, f"Не удалось открыть базу данных:\n{exc}")
         return 1
 
     try:
         window = MainWindow(db)
-    except Exception as exc:  # pragma: no cover
+    except Exception as exc:
         log.exception("Failed to create main window")
         QMessageBox.critical(None, APP_NAME, f"Ошибка запуска интерфейса:\n{exc}")
         db.close()

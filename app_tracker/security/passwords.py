@@ -1,8 +1,7 @@
-"""Exit-password hashing.
+"""Exit-password hashing: bcrypt when available, salted SHA-256 otherwise.
 
-Uses :mod:`bcrypt` when available and transparently falls back to salted
-SHA-256 otherwise. Hashes are self-describing (bcrypt hashes start with ``$2``)
-so a database created with one backend keeps working if the other is used.
+Hashes are self-describing (the SHA-256 fallback is prefixed), so a database
+created with one backend still verifies under the other.
 """
 
 from __future__ import annotations
@@ -22,7 +21,7 @@ except ImportError:
     _BCRYPT_AVAILABLE = False
     log.warning("bcrypt not installed; falling back to salted SHA-256.")
 
-# Marker prefix for the SHA-256 fallback: "sha256$<hex-salt>$<hex-digest>".
+# "sha256$<hex-salt>$<hex-digest>"
 _SHA_PREFIX = b"sha256$"
 
 

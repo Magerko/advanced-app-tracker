@@ -19,6 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 full = ["pynput>=1.7", "bcrypt>=4.0", "pygetwindow>=0.0.9"]
+dev = ["pytest>=7.0", "ruff>=0.5"]
 
 [project.scripts]
 app-tracker = "app_tracker.__main__:main"
@@ -36,3 +37,11 @@ packages = [
 
 [tool.setuptools.package-data]
 "app_tracker.resources" = ["*.png"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100

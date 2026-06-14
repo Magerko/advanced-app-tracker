@@ -1,6 +1,6 @@
 """Start-with-Windows support via the ``HKCU\\...\\Run`` registry key.
 
-No-ops gracefully on non-Windows platforms (returns ``False``).
+A no-op returning ``False`` on non-Windows platforms.
 """
 
 from __future__ import annotations
@@ -16,7 +16,6 @@ _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
 
 def set_autorun(value_name: str, enable: bool = True) -> bool:
-    """Enable or disable autostart. Returns ``True`` on success."""
     if sys.platform != "win32":
         return False
     import winreg

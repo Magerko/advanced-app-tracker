@@ -1,10 +1,8 @@
-"""Background tracking worker.
+"""Background tracking worker that runs on its own QThread.
 
-Lives on its own :class:`QThread`. Every tick it determines the foreground
-application, maintains the open usage-log row, recomputes today/week totals
-and checks configured limits. Communication with the UI is exclusively via
-signals; UI -> worker calls go through ``@pyqtSlot`` methods invoked with
-``QMetaObject.invokeMethod`` (which is why the slots are decorated).
+Each tick it finds the foreground app, keeps the open usage-log row current,
+recomputes today/week totals and checks limits. UI calls reach it through the
+``@pyqtSlot`` methods via ``QMetaObject.invokeMethod``.
 """
 
 from __future__ import annotations
@@ -32,9 +30,7 @@ from app_tracker.utils import friendly_app_name
 
 log = logging.getLogger(__name__)
 
-#: Don't re-issue a terminate request for the same PID more often than this.
 _TERMINATE_COOLDOWN_S = 30
-#: Warn when usage reaches this fraction of a limit.
 _WARN_FRACTION = 0.9
 
 
@@ -67,9 +63,8 @@ class TrackerWorker(QObject):
 
         self._terminate_on_limit = self.db.get_bool(SETTING_TERMINATE_ON_LIMIT)
         threshold = self.db.get_int(SETTING_IDLE_THRESHOLD, DEFAULT_IDLE_THRESHOLD_SECONDS)
-        # Parent the detector to the worker so it migrates with us when the
-        # worker is moved to its QThread (otherwise its QTimer would live on
-        # the main thread and Qt would warn about cross-thread timer access).
+        # Parent the detector to the worker so its QTimer migrates with us when
+        # the worker is moved to its QThread (Qt warns about cross-thread timers).
         self.idle_detector = IdleDetector(threshold, parent=self)
         self.idle_detector.idle_changed.connect(self._on_idle_changed)
 
@@ -81,7 +76,6 @@ class TrackerWorker(QObject):
         return {"today": 0, "week": 0, "prod_today": 0, "prod_week": 0,
                 "unprod_today": 0, "unprod_week": 0}
 
-    # -- control slots (invoked from the UI thread) ---------------------------
     @pyqtSlot()
     def start_tracking(self) -> None:
         if self._running:
@@ -133,7 +127,6 @@ class TrackerWorker(QObject):
     def is_paused(self) -> bool:
         return self._paused
 
-    # -- idle handling --------------------------------------------------------
     def _on_idle_changed(self, is_idle: bool) -> None:
         if self._is_idle == is_idle:
             return
@@ -143,7 +136,6 @@ class TrackerWorker(QObject):
             self._end_current_log()
         self._emit_status(self._status_text())
 
-    # -- core loop ------------------------------------------------------------
     def _tick(self) -> None:
         if not self._running or self._paused or self._is_idle:
             if self.current_log_id is not None:
@@ -171,7 +163,7 @@ class TrackerWorker(QObject):
             name = friendly_app_name(info.process_name, path)
             return path, name, info.pid
 
-        if info.window_title:  # fallback: identify by window title only
+        if info.window_title:
             return f"title::{info.window_title}", info.window_title, info.pid
         return None, None, None
 
@@ -196,12 +188,11 @@ class TrackerWorker(QObject):
         if log_id is not None:
             self.db.end_usage_log(log_id)
 
-    # -- summary / limits -----------------------------------------------------
     def _refresh_summary(self) -> None:
         self.usage_summary = self.db.get_usage_summary()
         self.limits = self.db.get_all_limits()
 
-        # Add the seconds elapsed in the still-open session to "*_display".
+        # Fold the seconds elapsed in the still-open session into "*_display".
         live_seconds = self._current_session_seconds()
         if self.current_app_id is not None:
             entry = self.usage_summary.setdefault(
@@ -275,12 +266,11 @@ class TrackerWorker(QObject):
         now = time.monotonic()
         last = self._terminate_requested_at.get(pid, 0.0)
         if now - last < _TERMINATE_COOLDOWN_S:
-            return  # already asked recently; don't spam every tick
+            return
         self._terminate_requested_at[pid] = now
         log.info("Limit exceeded for active app '%s' (PID %s); requesting terminate.", name, pid)
         self.requestTerminateApp.emit(pid)
 
-    # -- status ---------------------------------------------------------------
     def _status_text(self) -> str:
         if not self._running:
             return "Остановлено"

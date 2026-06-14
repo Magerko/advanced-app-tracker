@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
-"""Bootstrap launcher.
+"""Launcher used by Windows autorun and by the guardian relaunch.
 
-Runs the application regardless of the current working directory by putting
-this file's directory (the project root) on ``sys.path``. This is the command
-used by Windows autorun and by the guardian when it relaunches the app.
+Adds the project root to sys.path so the app starts from any working directory.
 """
 
 import os
