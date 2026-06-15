@@ -1,7 +1,11 @@
-"""Cross-platform detection of the current foreground window.
+"""Определение активного окна на разных платформах.
 
-Each platform has a native implementation, with a pygetwindow (title-only)
-fallback. Callers get ``None`` when nothing useful can be determined.
+На каждой платформе своя реализация, плюс fallback через pygetwindow
+(только заголовок). Если ничего не получилось — возвращаем None.
+
+На KDE Plasma Wayland при первом вызове автоматически устанавливается
+KWin-скрипт, который слушает смену фокуса и пишет в journald.
+Фоновый поток читает journald и держит результат в памяти.
 """
 
 from __future__ import annotations
@@ -29,7 +33,8 @@ except Exception:
     _gw = None
 
 
-# Windows
+# ── Windows ──────────────────────────────────────────────────────────────────
+
 _win_user32 = None
 if sys.platform == "win32":
     try:
@@ -76,7 +81,8 @@ def _active_window_windows() -> Optional[ActiveWindowInfo]:
         return None
 
 
-# macOS
+# ── macOS ─────────────────────────────────────────────────────────────────────
+
 _macos_ok = False
 if sys.platform == "darwin":
     try:
@@ -122,13 +128,15 @@ def _active_window_macos() -> Optional[ActiveWindowInfo]:
         return None
 
 
-# Linux (X11)
+# ── Linux ─────────────────────────────────────────────────────────────────────
+
+# X11 инициализируем только если не Wayland
 _x11 = None
 if sys.platform.startswith("linux") and "WAYLAND_DISPLAY" not in os.environ:
     try:
-        from Xlib import display
+        from Xlib import display as _xlib_display
 
-        _x11_display = display.Display()
+        _x11_display = _xlib_display.Display()
         _x11 = {
             "display": _x11_display,
             "root": _x11_display.screen().root,
@@ -139,10 +147,26 @@ if sys.platform.startswith("linux") and "WAYLAND_DISPLAY" not in os.environ:
         }
     except Exception as exc:
         log.warning("X11 window APIs unavailable: %s", exc)
-        _x11 = None
 
 
 def _active_window_linux() -> Optional[ActiveWindowInfo]:
+    # Wayland: KDE Plasma через KWin-скрипт + journald
+    if "WAYLAND_DISPLAY" in os.environ:
+        try:
+            from app_tracker.platform_support.active_window_wayland import (
+                get_active_window_wayland,
+            )
+            result = get_active_window_wayland()
+            if result:
+                pid, process_name, executable_path, caption = result
+                if executable_path:
+                    executable_path = os.path.normpath(executable_path)
+                return ActiveWindowInfo(pid, process_name, executable_path, caption)
+        except Exception as exc:
+            log.debug("Wayland active window lookup failed: %s", exc)
+        return None
+
+    # X11
     if _x11 is None:
         return None
     try:
@@ -174,6 +198,8 @@ def _active_window_linux() -> Optional[ActiveWindowInfo]:
         return None
 
 
+# ── Fallback ──────────────────────────────────────────────────────────────────
+
 def _active_window_fallback() -> Optional[ActiveWindowInfo]:
     if _gw is None:
         return None
@@ -186,8 +212,10 @@ def _active_window_fallback() -> Optional[ActiveWindowInfo]:
     return None
 
 
+# ── Public API ────────────────────────────────────────────────────────────────
+
 def get_active_window_info() -> Optional[ActiveWindowInfo]:
-    """Return information about the foreground window, or ``None``."""
+    """Вернуть информацию об активном окне или None."""
     if sys.platform == "win32":
         info = _active_window_windows()
     elif sys.platform == "darwin":
