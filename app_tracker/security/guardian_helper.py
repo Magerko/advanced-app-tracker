@@ -1,12 +1,3 @@
-"""Guardian watcher process.
-
-Run as::
-
-    python -m app_tracker.security.guardian_helper <main_pid> <create_time> <signal_file>
-
-Watches the main application and relaunches it if it dies unexpectedly.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -36,7 +27,7 @@ def _main_is_alive(pid: int, create_time: float) -> bool:
     try:
         proc = psutil.Process(pid)
         if create_time and abs(proc.create_time() - create_time) > _CREATE_TIME_TOLERANCE_S:
-            return False  # the PID was reused by a different process
+            return False
         return proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE
     except (psutil.NoSuchProcess, psutil.AccessDenied):
         return False
@@ -114,13 +105,11 @@ def run(main_pid: int, create_time: float, signal_file: Path) -> int:
             return 0
 
         if not _main_is_alive(main_pid, create_time):
-            # Re-check the signal to avoid racing a simultaneous clean exit.
             if _consume_signal(signal_file):
                 log.info("Main exited cleanly; not relaunching.")
                 return 0
             log.warning("Main process %s vanished unexpectedly.", main_pid)
             _relaunch()
-            # The relaunched app spawns its own guardian, so we exit either way.
             return 0
 
         time.sleep(GUARDIAN_POLL_INTERVAL_SECONDS)

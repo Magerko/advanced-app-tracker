@@ -1,13 +1,3 @@
-"""The guardian: an opt-in anti-kill watchdog.
-
-A small helper process watches the main app's PID and relaunches it if it dies
-without first writing a clean-shutdown signal. The in-app side here manages that
-helper; the watching loop lives in guardian_helper.py.
-
-A clean exit is always honoured, PID reuse is guarded by process create time,
-and a relaunch back-off prevents crash-loops.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -26,8 +16,6 @@ log = logging.getLogger(__name__)
 
 
 class Guardian(QObject):
-    """Manages the guardian helper subprocess from inside the main app."""
-
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._helper: Optional[subprocess.Popen] = None
@@ -49,7 +37,6 @@ class Guardian(QObject):
     def stop(self) -> None:
         self._stopping = True
         self._timer.stop()
-        # Signal that this exit is intentional, so the helper won't relaunch.
         try:
             guardian_signal_path().write_text("shutdown", encoding="utf-8")
         except OSError as exc:

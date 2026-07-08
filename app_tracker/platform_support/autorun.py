@@ -1,8 +1,3 @@
-"""Start-with-Windows support via the ``HKCU\\...\\Run`` registry key.
-
-A no-op returning ``False`` on non-Windows platforms.
-"""
-
 from __future__ import annotations
 
 import logging

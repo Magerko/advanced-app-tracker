@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""Launcher used by Windows autorun and by the guardian relaunch.
-
-Adds the project root to sys.path so the app starts from any working directory.
-"""
-
 import os
 import sys
 

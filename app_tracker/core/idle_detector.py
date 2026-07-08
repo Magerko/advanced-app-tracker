@@ -1,9 +1,3 @@
-"""User-idle detection from global mouse/keyboard activity via pynput.
-
-If pynput is unavailable the detector degrades gracefully and never reports
-the user as idle.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -17,15 +11,13 @@ log = logging.getLogger(__name__)
 try:
     from pynput import keyboard, mouse
     _PYNPUT_AVAILABLE = True
-except Exception as exc:  # ImportError, or a platform/permission failure
-    keyboard = mouse = None  # type: ignore
+except Exception as exc:
+    keyboard = mouse = None
     _PYNPUT_AVAILABLE = False
     log.warning("pynput unavailable (%s). Idle detection disabled.", exc)
 
 
 class IdleDetector(QObject):
-    """Emits idle_changed (True = idle) when the idle state flips."""
-
     idle_changed = pyqtSignal(bool)
 
     _ACTIVITY_DEBOUNCE_S = 0.5
@@ -51,7 +43,6 @@ class IdleDetector(QObject):
         with self._lock:
             return self._is_idle
 
-    # Listener callbacks run on pynput's own threads.
     def _on_activity(self, *_args) -> None:
         emit_active = False
         with self._lock:

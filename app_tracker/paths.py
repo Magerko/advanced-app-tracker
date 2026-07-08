@@ -1,5 +1,3 @@
-"""Per-user filesystem locations for the database, logs and runtime files."""
-
 from __future__ import annotations
 
 import os

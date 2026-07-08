@@ -1,5 +1,3 @@
-"""Application bootstrap: build the QApplication and run the main window."""
-
 from __future__ import annotations
 
 import logging
@@ -26,7 +24,6 @@ def run() -> int:
     app.setWindowIcon(app_icon())
     app.setStyle("Fusion")
     app.setPalette(build_dark_palette())
-    # Closing to the tray must not quit; we quit explicitly instead.
     app.setQuitOnLastWindowClosed(False)
 
     try:

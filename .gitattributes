@@ -1,6 +1,0 @@
-# Normalise line endings: text files stored as LF in the repo.
-* text=auto eol=lf
-
-# Binary assets - never touch.
-*.png binary
-*.db binary

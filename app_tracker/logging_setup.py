@@ -1,5 +1,3 @@
-"""Root logging configuration (console + rotating file in the data directory)."""
-
 from __future__ import annotations
 
 import logging

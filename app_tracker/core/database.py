@@ -1,16 +1,9 @@
-"""SQLite persistence layer.
-
-A single DatabaseManager is created in app.py and passed to everything that
-needs it. One connection is shared between the UI thread and the tracker
-thread, serialised through an internal lock.
-"""
-
 from __future__ import annotations
 
 import logging
 import os
 import sqlite3
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from threading import RLock
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -30,8 +23,13 @@ log = logging.getLogger(__name__)
 Row = Tuple[Any, ...]
 
 
-# Python 3.12 deprecated the implicit datetime/date sqlite3 adapters, so we
-# register explicit ISO-format ones (same on-disk format as before).
+def _start_of_day(value: date) -> datetime:
+    return datetime.combine(value, time.min)
+
+
+def _start_of_next_day(value: date) -> datetime:
+    return _start_of_day(value + timedelta(days=1))
+
 def _adapt_datetime(value: datetime) -> str:
     return value.isoformat(sep=" ")
 
@@ -91,6 +89,8 @@ class DatabaseManager:
                 );
                 CREATE INDEX IF NOT EXISTS idx_usage_log_start_time ON usage_log(start_time);
                 CREATE INDEX IF NOT EXISTS idx_usage_log_app_id ON usage_log(app_id);
+                CREATE INDEX IF NOT EXISTS idx_usage_log_app_start_time
+                    ON usage_log(app_id, start_time);
 
                 CREATE TABLE IF NOT EXISTS limits (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -192,12 +192,14 @@ class DatabaseManager:
             "SELECT id, name, executable_path, productivity FROM applications ORDER BY name ASC"
         )
 
-    def start_usage_log(self, app_id: int) -> Optional[int]:
+    def start_usage_log(
+        self, app_id: int, start_time: Optional[datetime] = None
+    ) -> Optional[int]:
         if not app_id:
             return None
         cur = self._execute(
             "INSERT INTO usage_log (app_id, start_time) VALUES (?, ?)",
-            (app_id, datetime.now()),
+            (app_id, start_time or datetime.now()),
         )
         return cur.lastrowid if cur else None
 
@@ -219,7 +221,6 @@ class DatabaseManager:
                 (end_time, duration, log_id),
             )
         else:
-            # Drop sub-second blips instead of logging them.
             self._execute("DELETE FROM usage_log WHERE id = ?", (log_id,))
 
     def get_log_start_time(self, log_id: int) -> Optional[datetime]:
@@ -232,26 +233,52 @@ class DatabaseManager:
         """Per-application totals for today and the current week."""
         today = date.today()
         week_start, _ = week_bounds(today)
+        today_start = _start_of_day(today)
+        tomorrow_start = _start_of_next_day(today)
+        week_start_dt = _start_of_day(week_start)
 
-        summary: Dict[int, Dict[str, Any]] = {}
-        for app_id, name, path, prod in self.get_all_apps():
-            summary[app_id] = {
-                "name": name, "path": path,
-                "prod": Productivity.from_value(prod),
-                "today": 0, "week": 0,
-            }
-
-        q = (
-            "SELECT app_id, SUM(duration_seconds) FROM usage_log "
-            "WHERE DATE(start_time) {cmp} DATE(?) AND duration_seconds > 0 GROUP BY app_id"
+        rows = self._fetch_all(
+            """
+            SELECT
+                a.id,
+                a.name,
+                a.executable_path,
+                a.productivity,
+                COALESCE(SUM(
+                    CASE
+                        WHEN u.start_time >= ? AND u.start_time < ?
+                        THEN u.duration_seconds
+                        ELSE 0
+                    END
+                ), 0) AS today_seconds,
+                COALESCE(SUM(
+                    CASE
+                        WHEN u.start_time >= ?
+                        THEN u.duration_seconds
+                        ELSE 0
+                    END
+                ), 0) AS week_seconds
+            FROM applications a
+            LEFT JOIN usage_log u
+                ON u.app_id = a.id
+                AND u.duration_seconds > 0
+                AND u.start_time >= ?
+            GROUP BY a.id
+            ORDER BY a.name ASC
+            """,
+            (today_start, tomorrow_start, week_start_dt, week_start_dt),
         )
-        for app_id, total in self._fetch_all(q.format(cmp="="), (today,)):
-            if app_id in summary:
-                summary[app_id]["today"] = total or 0
-        for app_id, total in self._fetch_all(q.format(cmp=">="), (week_start,)):
-            if app_id in summary:
-                summary[app_id]["week"] = total or 0
-        return summary
+
+        return {
+            app_id: {
+                "name": name,
+                "path": path,
+                "prod": Productivity.from_value(prod),
+                "today": today_seconds or 0,
+                "week": week_seconds or 0,
+            }
+            for app_id, name, path, prod, today_seconds, week_seconds in rows
+        }
 
     def get_history(self, start_date: date, end_date: date) -> List[Row]:
         return self._fetch_all(
@@ -259,10 +286,10 @@ class DatabaseManager:
             SELECT a.name, a.executable_path, a.productivity,
                    DATE(u.start_time) AS usage_date, SUM(u.duration_seconds) AS total_seconds
             FROM usage_log u JOIN applications a ON u.app_id = a.id
-            WHERE DATE(u.start_time) BETWEEN DATE(?) AND DATE(?) AND u.duration_seconds > 0
+            WHERE u.start_time >= ? AND u.start_time < ? AND u.duration_seconds > 0
             GROUP BY a.id, usage_date ORDER BY usage_date DESC, a.name ASC
             """,
-            (start_date, end_date),
+            (_start_of_day(start_date), _start_of_next_day(end_date)),
         )
 
     def get_pie_data(self, start_date: date, end_date: date) -> List[Row]:
@@ -270,10 +297,10 @@ class DatabaseManager:
             """
             SELECT a.name, SUM(u.duration_seconds) AS total_seconds
             FROM usage_log u JOIN applications a ON u.app_id = a.id
-            WHERE DATE(u.start_time) BETWEEN DATE(?) AND DATE(?) AND u.duration_seconds > 0
+            WHERE u.start_time >= ? AND u.start_time < ? AND u.duration_seconds > 0
             GROUP BY a.id ORDER BY total_seconds DESC
             """,
-            (start_date, end_date),
+            (_start_of_day(start_date), _start_of_next_day(end_date)),
         )
 
     def get_daily_totals(self, num_days: int = 7) -> List[Dict[str, Any]]:
@@ -283,10 +310,10 @@ class DatabaseManager:
             """
             SELECT DATE(start_time) AS usage_date, SUM(duration_seconds) AS total_seconds
             FROM usage_log
-            WHERE DATE(start_time) BETWEEN DATE(?) AND DATE(?) AND duration_seconds > 0
+            WHERE start_time >= ? AND start_time < ? AND duration_seconds > 0
             GROUP BY usage_date ORDER BY usage_date ASC
             """,
-            (start_date, end_date),
+            (_start_of_day(start_date), _start_of_next_day(end_date)),
         )
         by_date = {row[0]: row[1] for row in rows}
         result = []

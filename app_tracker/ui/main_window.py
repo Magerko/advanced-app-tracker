@@ -1,5 +1,3 @@
-"""The main application window, system tray and overall lifecycle."""
-
 from __future__ import annotations
 
 import logging
@@ -56,6 +54,7 @@ class MainWindow(QMainWindow):
         self.usage_summary: dict = {}
         self.limits: dict = {}
         self.totals: dict = {}
+        self._row_by_app_id: dict[int, int] = {}
         self._warnings_shown_today: dict[str, set] = defaultdict(set)
 
         self.guardian = Guardian(self)
@@ -214,14 +213,31 @@ class MainWindow(QMainWindow):
         )
 
     def _find_row(self, app_id: int) -> int:
+        row = self._row_by_app_id.get(app_id, -1)
+        if self._row_matches_app(row, app_id):
+            return row
+        self._rebuild_row_index()
+        row = self._row_by_app_id.get(app_id, -1)
+        return row if self._row_matches_app(row, app_id) else -1
+
+    def _row_matches_app(self, row: int, app_id: int) -> bool:
+        if row < 0 or row >= self.table.rowCount():
+            return False
+        item = self.table.item(row, 0)
+        return bool(item and item.data(Qt.ItemDataRole.UserRole) == app_id)
+
+    def _rebuild_row_index(self) -> None:
+        self._row_by_app_id.clear()
         for row in range(self.table.rowCount()):
             item = self.table.item(row, 0)
-            if item and item.data(Qt.ItemDataRole.UserRole) == app_id:
-                return row
-        return -1
+            if item:
+                app_id = item.data(Qt.ItemDataRole.UserRole)
+                if app_id is not None:
+                    self._row_by_app_id[app_id] = row
 
     def _populate_table(self, summary: dict) -> None:
         self.table.setSortingEnabled(False)
+        self._rebuild_row_index()
         active_id = getattr(self.worker, "current_app_id", None)
 
         for app_id, data in summary.items():
@@ -235,6 +251,7 @@ class MainWindow(QMainWindow):
             if row == -1:
                 row = self.table.rowCount()
                 self.table.insertRow(row)
+                self._row_by_app_id[app_id] = row
 
             name_item = QTableWidgetItem(data.get("name", "N/A"))
             name_item.setData(Qt.ItemDataRole.UserRole, app_id)
@@ -249,6 +266,7 @@ class MainWindow(QMainWindow):
 
         self._prune_table(summary, active_id)
         self.table.setSortingEnabled(True)
+        self._rebuild_row_index()
 
     def _ensure_checkbox(self, row: int, app_id: int, prod: Productivity) -> None:
         widget = self.table.cellWidget(row, 1)
@@ -273,7 +291,10 @@ class MainWindow(QMainWindow):
         for app_id, data in summary.items():
             if app_id == active_id:
                 keep.add(app_id)
-            elif data.get("today", 0) or data.get("week", 0):
+            elif (
+                data.get("today_display", data.get("today", 0))
+                or data.get("week_display", data.get("week", 0))
+            ):
                 keep.add(app_id)
 
         for row in range(self.table.rowCount() - 1, -1, -1):
@@ -548,7 +569,6 @@ class MainWindow(QMainWindow):
             self._show_close_hint()
             return
 
-        # No tray to hide into, so the close button means quit.
         if not self._confirm_exit_password():
             event.ignore()
             return

@@ -1,15 +1,9 @@
-"""Cross-platform detection of the current foreground window.
-
-Each platform has a native implementation, with a pygetwindow (title-only)
-fallback. Callers get ``None`` when nothing useful can be determined.
-"""
-
 from __future__ import annotations
 
 import logging
 import os
 import sys
-from typing import NamedTuple, Optional
+from typing import Dict, List, NamedTuple, Optional
 
 import psutil
 
@@ -37,7 +31,17 @@ if sys.platform == "win32":
         from ctypes import wintypes
 
         _win_user32 = ctypes.windll.user32
+        _win_dwmapi = getattr(ctypes.windll, "dwmapi", None)
         _win_user32.GetForegroundWindow.restype = wintypes.HWND
+        _win_user32.GetShellWindow.restype = wintypes.HWND
+        _win_user32.EnumWindows.argtypes = [ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM), wintypes.LPARAM]
+        _win_user32.EnumWindows.restype = wintypes.BOOL
+        _win_user32.IsWindowVisible.argtypes = [wintypes.HWND]
+        _win_user32.IsWindowVisible.restype = wintypes.BOOL
+        _win_user32.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
+        _win_user32.GetWindow.restype = wintypes.HWND
+        _win_user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+        _win_user32.GetWindowLongW.restype = ctypes.c_long
         _win_user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
         _win_user32.GetWindowTextLengthW.restype = ctypes.c_int
         _win_user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
@@ -46,9 +50,78 @@ if sys.platform == "win32":
             wintypes.HWND, ctypes.POINTER(wintypes.DWORD)
         ]
         _win_user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+        if _win_dwmapi is not None:
+            _win_dwmapi.DwmGetWindowAttribute.argtypes = [
+                wintypes.HWND,
+                wintypes.DWORD,
+                ctypes.c_void_p,
+                wintypes.DWORD,
+            ]
+            _win_dwmapi.DwmGetWindowAttribute.restype = ctypes.c_long
     except (AttributeError, OSError) as exc:
         log.warning("Windows window APIs unavailable: %s", exc)
         _win_user32 = None
+        _win_dwmapi = None
+
+
+_GW_OWNER = 4
+_GWL_EXSTYLE = -20
+_WS_EX_TOOLWINDOW = 0x00000080
+_DWMWA_CLOAKED = 14
+
+
+def _window_title_windows(hwnd) -> str:
+    length = _win_user32.GetWindowTextLengthW(hwnd) + 1
+    if length <= 1:
+        return ""
+    buffer = ctypes.create_unicode_buffer(length)
+    _win_user32.GetWindowTextW(hwnd, buffer, length)
+    return buffer.value.strip()
+
+
+def _is_trackable_window_windows(hwnd) -> bool:
+    if _win_user32 is None:
+        return False
+    try:
+        if not hwnd or hwnd == _win_user32.GetShellWindow():
+            return False
+        if not _win_user32.IsWindowVisible(hwnd):
+            return False
+        if _win_user32.GetWindow(hwnd, _GW_OWNER):
+            return False
+        if _win_user32.GetWindowLongW(hwnd, _GWL_EXSTYLE) & _WS_EX_TOOLWINDOW:
+            return False
+        if _win_dwmapi is not None:
+            cloaked = wintypes.DWORD()
+            result = _win_dwmapi.DwmGetWindowAttribute(
+                hwnd, _DWMWA_CLOAKED, ctypes.byref(cloaked), ctypes.sizeof(cloaked)
+            )
+            if result == 0 and cloaked.value:
+                return False
+        return bool(_window_title_windows(hwnd))
+    except (OSError, ValueError):
+        return False
+
+
+def _window_info_windows(hwnd) -> Optional[ActiveWindowInfo]:
+    if _win_user32 is None:
+        return None
+    try:
+        title = _window_title_windows(hwnd)
+        if not title:
+            return None
+        pid_holder = wintypes.DWORD()
+        _win_user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid_holder))
+        pid = pid_holder.value
+        if not pid:
+            return None
+
+        proc = psutil.Process(pid)
+        with proc.oneshot():
+            return ActiveWindowInfo(pid, proc.name(), proc.exe(), title)
+    except (psutil.NoSuchProcess, psutil.AccessDenied, OSError) as exc:
+        log.debug("Windows window lookup failed: %s", exc)
+        return None
 
 
 def _active_window_windows() -> Optional[ActiveWindowInfo]:
@@ -64,16 +137,32 @@ def _active_window_windows() -> Optional[ActiveWindowInfo]:
         if not pid:
             return None
 
-        length = _win_user32.GetWindowTextLengthW(hwnd) + 1
-        buffer = ctypes.create_unicode_buffer(length)
-        _win_user32.GetWindowTextW(hwnd, buffer, length)
-
-        proc = psutil.Process(pid)
-        with proc.oneshot():
-            return ActiveWindowInfo(pid, proc.name(), proc.exe(), buffer.value)
+        return _window_info_windows(hwnd)
     except (psutil.NoSuchProcess, psutil.AccessDenied, OSError) as exc:
         log.debug("Windows active window lookup failed: %s", exc)
         return None
+
+
+def _trackable_windows_windows() -> List[ActiveWindowInfo]:
+    if _win_user32 is None:
+        return []
+
+    windows: List[ActiveWindowInfo] = []
+    enum_proc_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def callback(hwnd, _lparam):
+        if _is_trackable_window_windows(hwnd):
+            info = _window_info_windows(hwnd)
+            if info is not None:
+                windows.append(info)
+        return True
+
+    try:
+        _win_user32.EnumWindows(enum_proc_type(callback), 0)
+    except OSError as exc:
+        log.debug("Windows window enumeration failed: %s", exc)
+        return []
+    return windows
 
 
 # macOS
@@ -206,3 +295,31 @@ def get_active_window_info() -> Optional[ActiveWindowInfo]:
         except Exception:
             pass
     return info
+
+
+def get_trackable_windows_info() -> List[ActiveWindowInfo]:
+    """Return user-facing windows that should accrue usage time.
+
+    On Windows this includes top-level application windows visible to the shell,
+    so unfocused apps can be counted. Other platforms fall back to the active
+    window until equivalent window enumeration is available.
+    """
+    if sys.platform == "win32":
+        infos = _trackable_windows_windows()
+        active = _active_window_windows()
+        if active is not None:
+            infos.insert(0, active)
+    else:
+        active = get_active_window_info()
+        infos = [active] if active is not None else []
+
+    deduped: Dict[str, ActiveWindowInfo] = {}
+    for info in infos:
+        path = os.path.normpath(info.executable_path) if info.executable_path else None
+        key = path or f"title::{info.window_title}"
+        if not key:
+            continue
+        if info.executable_path and path:
+            info = info._replace(executable_path=path)
+        deduped.setdefault(key, info)
+    return list(deduped.values())

@@ -1,5 +1,3 @@
-"""Application theming (a Fusion-based dark palette) and the window icon."""
-
 from __future__ import annotations
 
 import logging

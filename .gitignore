@@ -29,3 +29,5 @@ Thumbs.db
 
 # Backup created during the refactor
 _original_backup/
+
+tests/

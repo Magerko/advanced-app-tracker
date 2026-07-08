@@ -1,10 +1,3 @@
-"""Background tracking worker that runs on its own QThread.
-
-Each tick it finds the foreground app, keeps the open usage-log row current,
-recomputes today/week totals and checks limits. UI calls reach it through the
-``@pyqtSlot`` methods via ``QMetaObject.invokeMethod``.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -25,7 +18,11 @@ from app_tracker.config import (
 from app_tracker.core.database import DatabaseManager
 from app_tracker.core.idle_detector import IdleDetector
 from app_tracker.core.productivity import Productivity
-from app_tracker.platform_support import get_active_window_info
+from app_tracker.platform_support import (
+    ActiveWindowInfo,
+    get_active_window_info,
+    get_trackable_windows_info,
+)
 from app_tracker.utils import friendly_app_name
 
 log = logging.getLogger(__name__)
@@ -35,9 +32,7 @@ _WARN_FRACTION = 0.9
 
 
 class TrackerWorker(QObject):
-    # usage_summary, limits, totals
     usageUpdated = pyqtSignal(dict, dict, dict)
-    # app_id, app_name, kind ("daily"/"daily-warn"/"weekly"/"weekly-warn"), usage, limit
     limitWarning = pyqtSignal(int, str, str, int, int)
     statusChanged = pyqtSignal(str)
     requestTerminateApp = pyqtSignal(int)
@@ -52,6 +47,8 @@ class TrackerWorker(QObject):
 
         self.current_log_id: Optional[int] = None
         self.current_app_id: Optional[int] = None
+        self._current_log_started_at: Optional[datetime] = None
+        self._open_sessions: Dict[str, Dict[str, Any]] = {}
         self._last_app_path: Optional[str] = None
         self._active_pid: Optional[int] = None
 
@@ -62,10 +59,10 @@ class TrackerWorker(QObject):
         self._terminate_requested_at: Dict[int, float] = {}
 
         self._terminate_on_limit = self.db.get_bool(SETTING_TERMINATE_ON_LIMIT)
-        threshold = self.db.get_int(SETTING_IDLE_THRESHOLD, DEFAULT_IDLE_THRESHOLD_SECONDS)
-        # Parent the detector to the worker so its QTimer migrates with us when
-        # the worker is moved to its QThread (Qt warns about cross-thread timers).
-        self.idle_detector = IdleDetector(threshold, parent=self)
+        self._idle_threshold = self.db.get_int(
+            SETTING_IDLE_THRESHOLD, DEFAULT_IDLE_THRESHOLD_SECONDS
+        )
+        self.idle_detector = IdleDetector(self._idle_threshold, parent=self)
         self.idle_detector.idle_changed.connect(self._on_idle_changed)
 
         self._timer = QTimer(self)
@@ -115,6 +112,7 @@ class TrackerWorker(QObject):
 
     @pyqtSlot(int)
     def set_idle_threshold(self, seconds: int) -> None:
+        self._idle_threshold = seconds
         self.idle_detector.set_threshold(seconds)
         self._emit_status(self._status_text())
 
@@ -138,20 +136,34 @@ class TrackerWorker(QObject):
 
     def _tick(self) -> None:
         if not self._running or self._paused or self._is_idle:
-            if self.current_log_id is not None:
+            if self._open_sessions:
                 self._end_current_log()
             self._emit_status(self._status_text())
             return
 
-        path, name, pid = self._resolve_foreground_app()
-        if path != self._last_app_path:
-            self._switch_app(path, name, pid)
+        foreground_path, foreground_name, foreground_pid = self._resolve_foreground_app()
+        apps = self._resolve_trackable_apps()
+        if foreground_path and foreground_name:
+            apps.setdefault(foreground_path, (foreground_name, foreground_pid))
+        self._sync_open_sessions(apps)
+        self._set_foreground_app(foreground_path, foreground_pid)
 
         self._refresh_summary()
         self._emit_status(self._status_text())
 
     def _resolve_foreground_app(self):
         info = get_active_window_info()
+        return self._window_info_to_app(info)
+
+    def _resolve_trackable_apps(self) -> Dict[str, tuple[str, Optional[int]]]:
+        apps: Dict[str, tuple[str, Optional[int]]] = {}
+        for info in get_trackable_windows_info():
+            path, name, pid = self._window_info_to_app(info)
+            if path and name:
+                apps[path] = (name, pid)
+        return apps
+
+    def _window_info_to_app(self, info: Optional[ActiveWindowInfo]):
         if info is None:
             return None, None, None
 
@@ -167,36 +179,73 @@ class TrackerWorker(QObject):
             return f"title::{info.window_title}", info.window_title, info.pid
         return None, None, None
 
-    def _switch_app(self, path, name, pid) -> None:
-        self._end_current_log()
-        if not (path and name):
-            return
-        app_id = self.db.get_or_create_app(name, path)
-        if app_id is None:
-            return
-        self.current_log_id = self.db.start_usage_log(app_id)
-        self.current_app_id = app_id
-        self._last_app_path = path
-        self._active_pid = pid
+    def _sync_open_sessions(self, apps: Dict[str, tuple[str, Optional[int]]]) -> None:
+        now = datetime.now()
+        active_paths = set(apps)
 
-    def _end_current_log(self) -> None:
-        log_id = self.current_log_id
+        for path in list(self._open_sessions):
+            if path not in active_paths:
+                self._end_session(path, now)
+
+        for path, (name, pid) in apps.items():
+            session = self._open_sessions.get(path)
+            if session is not None:
+                session["name"] = name
+                session["pid"] = pid
+                continue
+
+            app_id = self.db.get_or_create_app(name, path)
+            if app_id is None:
+                continue
+            log_id = self.db.start_usage_log(app_id, now)
+            if log_id is None:
+                continue
+            self._open_sessions[path] = {
+                "app_id": app_id,
+                "log_id": log_id,
+                "started_at": now,
+                "name": name,
+                "pid": pid,
+            }
+
+    def _set_foreground_app(self, path, pid) -> None:
+        if path and path in self._open_sessions:
+            session = self._open_sessions[path]
+            self.current_log_id = session["log_id"]
+            self.current_app_id = session["app_id"]
+            self._current_log_started_at = session["started_at"]
+            self._last_app_path = path
+            self._active_pid = pid if pid is not None else session.get("pid")
+            return
+
         self.current_log_id = None
         self.current_app_id = None
+        self._current_log_started_at = None
         self._last_app_path = None
         self._active_pid = None
-        if log_id is not None:
-            self.db.end_usage_log(log_id)
+
+    def _end_session(self, path: str, end_time: Optional[datetime] = None) -> None:
+        session = self._open_sessions.pop(path, None)
+        if session is not None:
+            self.db.end_usage_log(session["log_id"], end_time)
+
+    def _end_current_log(self) -> None:
+        end_time = datetime.now()
+        for path in list(self._open_sessions):
+            self._end_session(path, end_time)
+        self.current_log_id = None
+        self.current_app_id = None
+        self._current_log_started_at = None
+        self._last_app_path = None
+        self._active_pid = None
 
     def _refresh_summary(self) -> None:
         self.usage_summary = self.db.get_usage_summary()
         self.limits = self.db.get_all_limits()
 
-        # Fold the seconds elapsed in the still-open session into "*_display".
-        live_seconds = self._current_session_seconds()
-        if self.current_app_id is not None:
+        for app_id, live_seconds in self._live_session_seconds_by_app().items():
             entry = self.usage_summary.setdefault(
-                self.current_app_id, self._summary_stub(self.current_app_id)
+                app_id, self._summary_stub(app_id)
             )
             entry["today_display"] = entry.get("today", 0) + live_seconds
             entry["week_display"] = entry.get("week", 0) + live_seconds
@@ -219,12 +268,22 @@ class TrackerWorker(QObject):
         self.usageUpdated.emit(self.usage_summary, self.limits, self.totals)
 
     def _current_session_seconds(self) -> int:
-        if self.current_log_id is None:
+        if self.current_log_id is None or self._current_log_started_at is None:
             return 0
-        start = self.db.get_log_start_time(self.current_log_id)
-        if start is None:
-            return 0
-        return max(0, int((datetime.now() - start).total_seconds()))
+        return max(0, int((datetime.now() - self._current_log_started_at).total_seconds()))
+
+    def _live_session_seconds_by_app(self) -> Dict[int, int]:
+        now = datetime.now()
+        live_by_app: Dict[int, int] = {}
+        for session in self._open_sessions.values():
+            app_id = session.get("app_id")
+            started_at = session.get("started_at")
+            if app_id is None or not isinstance(started_at, datetime):
+                continue
+            live_by_app[app_id] = live_by_app.get(app_id, 0) + max(
+                0, int((now - started_at).total_seconds())
+            )
+        return live_by_app
 
     def _summary_stub(self, app_id: int) -> Dict[str, Any]:
         details = self.db.get_app_details(app_id)
@@ -260,9 +319,13 @@ class TrackerWorker(QObject):
             self._maybe_terminate(app_id, name)
 
     def _maybe_terminate(self, app_id: int, name: str) -> None:
-        if app_id != self.current_app_id or self._active_pid is None:
+        pid = None
+        for session in self._open_sessions.values():
+            if session.get("app_id") == app_id:
+                pid = session.get("pid")
+                break
+        if pid is None:
             return
-        pid = self._active_pid
         now = time.monotonic()
         last = self._terminate_requested_at.get(pid, 0.0)
         if now - last < _TERMINATE_COOLDOWN_S:
@@ -277,7 +340,7 @@ class TrackerWorker(QObject):
         if self._paused:
             return "Приостановлено"
         if self._is_idle:
-            return f"Неактивен ({self.db.get_int(SETTING_IDLE_THRESHOLD, DEFAULT_IDLE_THRESHOLD_SECONDS)}с)"
+            return f"Неактивен ({self._idle_threshold}с)"
         if self.current_app_id is not None:
             data = self.usage_summary.get(self.current_app_id)
             if data and data.get("name"):

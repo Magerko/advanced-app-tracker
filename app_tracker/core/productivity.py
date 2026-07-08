@@ -1,8 +1,3 @@
-"""Productivity classification of applications.
-
-The integer values are persisted in the database, so they must stay stable.
-"""
-
 from __future__ import annotations
 
 from enum import IntEnum
@@ -35,7 +30,6 @@ _LABELS = {
     Productivity.UNPRODUCTIVE: "Непродуктивно",
 }
 
-# Row background colours (RGB), tuned for the dark theme.
 _COLORS = {
     Productivity.PRODUCTIVE: (180, 255, 180),
     Productivity.UNPRODUCTIVE: (255, 180, 180),

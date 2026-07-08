@@ -1,9 +1,3 @@
-"""The "Графики" tab: a matplotlib pie chart and a pyqtgraph daily-trend bar.
-
-Both backends are optional; a missing one shows a placeholder instead of
-crashing the tab.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -32,8 +26,8 @@ try:
 
     _MATPLOTLIB_OK = True
 except ImportError:
-    matplotlib = None  # type: ignore
-    FigureCanvas = Figure = None  # type: ignore
+    matplotlib = None
+    FigureCanvas = Figure = None
     _MATPLOTLIB_OK = False
     log.warning("matplotlib unavailable; pie chart disabled.")
 
@@ -42,7 +36,7 @@ try:
 
     _PYQTGRAPH_OK = True
 except ImportError:
-    pg = None  # type: ignore
+    pg = None
     _PYQTGRAPH_OK = False
     log.warning("pyqtgraph unavailable; bar chart disabled.")
 

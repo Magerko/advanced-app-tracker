@@ -1,5 +1,3 @@
-"""Duration formatting/parsing and friendly application names."""
-
 from __future__ import annotations
 
 import os
@@ -7,7 +5,6 @@ from typing import Optional
 
 
 def format_duration(seconds: Optional[int]) -> str:
-    """Format a number of seconds as ``Xч Yм`` / ``Yм Zс`` / ``Zс``."""
     if seconds is None:
         return "N/A"
     seconds = max(0, int(seconds))
@@ -27,10 +24,6 @@ _UNIT_SECONDS = {
 
 
 def parse_time_input(text: str) -> Optional[int]:
-    """Parse a duration like ``"1ч 30м"`` or ``"45m"`` into seconds.
-
-    Returns ``0`` for an empty string and ``None`` if anything can't be parsed.
-    """
     if not text:
         return 0
 

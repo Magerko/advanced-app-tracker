@@ -1,9 +1,3 @@
-"""Exit-password hashing: bcrypt when available, salted SHA-256 otherwise.
-
-Hashes are self-describing (the SHA-256 fallback is prefixed), so a database
-created with one backend still verifies under the other.
-"""
-
 from __future__ import annotations
 
 import hashlib
@@ -17,11 +11,10 @@ try:
     import bcrypt
     _BCRYPT_AVAILABLE = True
 except ImportError:
-    bcrypt = None  # type: ignore
+    bcrypt = None
     _BCRYPT_AVAILABLE = False
     log.warning("bcrypt not installed; falling back to salted SHA-256.")
 
-# "sha256$<hex-salt>$<hex-digest>"
 _SHA_PREFIX = b"sha256$"
 
 
