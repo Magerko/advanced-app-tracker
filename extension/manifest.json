@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Advanced App Tracker",
+  "version": "1.0.0",
+  "description": "Sends the active browser tab to Advanced App Tracker (local only).",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "app-tracker@example.local"
+    }
+  },
+  "permissions": ["tabs", "storage"],
+  "host_permissions": ["http://127.0.0.1:8765/*"],
+  "background": {
+    "scripts": ["background.js"]
+  }
+}
