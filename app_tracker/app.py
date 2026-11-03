@@ -5,9 +5,18 @@ from __future__ import annotations
 import logging
 import sys
 
-from PyQt6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
+from PyQt6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon, QTabWidget
 
-from app_tracker.config import APP_NAME, ORG_NAME, SETTING_START_MINIMIZED
+from app_tracker.browser.api import BrowserApiServer
+from app_tracker.ui.browser_report_widget import BrowserReportWidget
+from app_tracker.browser.storage import BrowserStorage
+from app_tracker.config import (
+    APP_NAME,
+    DEFAULT_BROWSER_API_PORT,
+    ORG_NAME,
+    SETTING_BROWSER_PORT,
+    SETTING_START_MINIMIZED,
+)
 from app_tracker.core.database import DatabaseManager
 from app_tracker.logging_setup import configure_logging
 from app_tracker.ui.main_window import MainWindow
@@ -43,6 +52,26 @@ def run() -> int:
         QMessageBox.critical(None, APP_NAME, f"Ошибка запуска интерфейса:\n{exc}")
         db.close()
         return 1
+    try:
+        tab_bar = window.findChild(QTabWidget)
+        if tab_bar is not None:
+            tab_bar.addTab(BrowserReportWidget(db), "Браузер")
+    except Exception:
+        log.exception("Could not add the browser tab")
+
+    # Optional browser-tab tracking: a local API that the browser extension
+    # talks to. A busy port or a missing library must never stop the app.
+    try:
+        browser_storage = BrowserStorage(db)
+        if browser_storage.is_enabled():
+            browser_api = BrowserApiServer(
+                browser_storage,
+                db.get_int(SETTING_BROWSER_PORT, DEFAULT_BROWSER_API_PORT),
+            )
+            browser_api.start()
+            app.aboutToQuit.connect(browser_api.stop)
+    except Exception:
+        log.exception("Browser tracking could not start")
 
     tray_available = QSystemTrayIcon.isSystemTrayAvailable()
     if db.get_bool(SETTING_START_MINIMIZED) and tray_available:
