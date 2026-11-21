@@ -33,6 +33,7 @@ from app_tracker.core.productivity import PRODUCTIVITY_COLORS, Productivity
 from app_tracker.core.tracker import TrackerWorker
 from app_tracker.security import check_password
 from app_tracker.security.guardian import Guardian
+from app_tracker.ui.browser_report_widget import BrowserReportWidget
 from app_tracker.ui.dialogs import HistoryDialog, LimitDialog, SettingsDialog
 from app_tracker.ui.graphs import GraphWidget
 from app_tracker.ui.theme import app_icon
@@ -87,6 +88,13 @@ class MainWindow(QMainWindow):
 
         self.graph_tab = GraphWidget(self.db)
         self.tabs.addTab(self.graph_tab, "Графики")
+
+        try:
+            self.browser_tab = BrowserReportWidget(self.db)
+            self.tabs.addTab(self.browser_tab, "Браузер")
+        except Exception:
+            # The browser report is an extra; the tracker must still work.
+            log.exception("Could not create the browser tab")
 
         self.status_label = QLabel("Инициализация…")
         self.statusBar().addPermanentWidget(self.status_label)

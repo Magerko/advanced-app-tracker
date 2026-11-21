@@ -97,8 +97,6 @@ class TrackerWorker(QObject):
         self._end_current_log()
         self._emit_status("Остановлено")
         log.info("Tracking stopped.")
-        from app_tracker.telegram_reporter import send_report
-        send_report(self.usage_summary, self.totals)
 
     @pyqtSlot()
     def pause_tracking(self) -> None:

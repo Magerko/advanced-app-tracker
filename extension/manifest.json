@@ -1,16 +1,24 @@
 {
   "manifest_version": 3,
   "name": "Advanced App Tracker",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Sends the active browser tab to Advanced App Tracker (local only).",
   "browser_specific_settings": {
     "gecko": {
-      "id": "app-tracker@example.local"
+      "id": "advanced-app-tracker@karatss.github.io",
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
     }
   },
-  "permissions": ["tabs", "storage"],
+  "permissions": ["tabs", "storage", "idle", "alarms"],
   "host_permissions": ["http://127.0.0.1:8765/*"],
   "background": {
     "scripts": ["background.js"]
+  },
+  "action": {
+    "default_title": "Advanced App Tracker",
+    "default_popup": "popup.html"
   }
 }

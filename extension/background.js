@@ -5,6 +5,11 @@ const API_BASE = "http://127.0.0.1:8765";
 const BROWSER_NAME = "firefox";
 const SESSION_KEY = "currentSession";
 
+// After this many seconds without mouse/keyboard input the user counts as away.
+const IDLE_SECONDS = 60;
+// Once a minute: re-check idle state and remind the app about the open session.
+const HEARTBEAT_ALARM = "heartbeat";
+
 // Events can arrive very close together. Handle them one after another.
 let queue = Promise.resolve();
 function enqueue(task) {
@@ -56,13 +61,48 @@ async function isWindowFocused(windowId) {
   }
 }
 
-async function stopCurrent(reason) {
+// A tab that plays sound (a video, a lecture) counts as "in use"
+// even when the mouse and keyboard are not touched.
+async function isAudible(tabId) {
+  try {
+    const tab = await browser.tabs.get(tabId);
+    return Boolean(tab.audible);
+  } catch (error) {
+    return false;
+  }
+}
+
+async function isUserActive() {
+  try {
+    return (await browser.idle.queryState(IDLE_SECONDS)) === "active";
+  } catch (error) {
+    return true;
+  }
+}
+
+function sendStart(session) {
+  return post("/browser-event/start", {
+    session_id: session.sessionId,
+    browser: BROWSER_NAME,
+    url: session.url,
+    title: session.title,
+    started_at: session.startedAt,
+    window_id: session.windowId,
+    tab_id: session.tabId,
+  });
+}
+
+// backSeconds: how long the user was already away when we noticed it.
+// That time is not counted.
+async function stopCurrent(reason, backSeconds = 0) {
   const session = await loadSession();
   if (!session) return;
   await saveSession(null);
+  const startedMs = Date.parse(session.startedAt) || Date.now();
+  const endedMs = Math.max(startedMs, Date.now() - backSeconds * 1000);
   await post("/browser-event/stop", {
     session_id: session.sessionId,
-    ended_at: new Date().toISOString(),
+    ended_at: new Date(endedMs).toISOString(),
     reason: reason,
   });
 }
@@ -80,23 +120,19 @@ async function startFor(tab, reason) {
 
   await stopCurrent(reason);
   if (!isTrackable(tab)) return;
+  // Do not start while the user is away (for example autoplay of the next video).
+  if (!(await isUserActive()) && !tab.audible) return;
 
   const fresh = {
     sessionId: crypto.randomUUID(),
     tabId: tab.id,
+    windowId: tab.windowId,
     url: tab.url,
     title: tab.title || "",
+    startedAt: new Date().toISOString(),
   };
   await saveSession(fresh);
-  await post("/browser-event/start", {
-    session_id: fresh.sessionId,
-    browser: BROWSER_NAME,
-    url: fresh.url,
-    title: fresh.title,
-    started_at: new Date().toISOString(),
-    window_id: tab.windowId,
-    tab_id: tab.id,
-  });
+  await sendStart(fresh);
 }
 
 // The user switched to another tab.
@@ -157,13 +193,51 @@ browser.windows.onFocusChanged.addListener((windowId) => {
   });
 });
 
-// Start tracking the current tab when Firefox or the extension starts.
-async function syncCurrent() {
+// Start tracking the current tab (startup, coming back from idle).
+async function syncCurrent(reason = "startup") {
   const win = await browser.windows.getLastFocused();
   if (!win.focused) return;
   const tabs = await browser.tabs.query({ active: true, windowId: win.id });
-  await startFor(tabs[0], "startup");
+  await startFor(tabs[0], reason);
 }
 
-browser.runtime.onStartup.addListener(() => enqueue(syncCurrent));
-browser.runtime.onInstalled.addListener(() => enqueue(syncCurrent));
+// The user went away or came back.
+async function onIdleState(state) {
+  if (state === "active") {
+    await syncCurrent("idle_end");
+    return;
+  }
+  const session = await loadSession();
+  if (!session) return;
+  if (state === "idle" && (await isAudible(session.tabId))) return;
+  // "idle" is reported IDLE_SECONDS after the last input; "locked" right away.
+  await stopCurrent("idle", state === "idle" ? IDLE_SECONDS : 0);
+}
+
+// Runs once a minute.
+async function heartbeat() {
+  const session = await loadSession();
+  if (!session) {
+    if (await isUserActive()) await syncCurrent("heartbeat");
+    return;
+  }
+  if (!(await isUserActive()) && !(await isAudible(session.tabId))) {
+    // Sound stopped while the user was away (the video ended).
+    await stopCurrent("idle", IDLE_SECONDS);
+    return;
+  }
+  // If the desktop app was restarted, it forgot the open session.
+  // Sending "start" again is safe: the app ignores a session it already has.
+  await sendStart(session);
+}
+
+browser.idle.setDetectionInterval(IDLE_SECONDS);
+browser.idle.onStateChanged.addListener((state) => enqueue(() => onIdleState(state)));
+
+browser.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: 1 });
+browser.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === HEARTBEAT_ALARM) enqueue(heartbeat);
+});
+
+browser.runtime.onStartup.addListener(() => enqueue(() => syncCurrent("startup")));
+browser.runtime.onInstalled.addListener(() => enqueue(() => syncCurrent("startup")));

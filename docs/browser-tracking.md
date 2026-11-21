@@ -16,22 +16,64 @@ Firefox extension  ->  http://127.0.0.1:8765  ->  app_tracker/browser  ->  SQLit
 4. Each session gets a category (study, code, social, entertainment, other)
    from the site and the page title (`categorizer.py`).
 
-## Install the extension (development)
+## Requirements
 
-1. Start Advanced App Tracker.
-2. In Firefox open `about:debugging#/runtime/this-firefox`.
-3. Click **Load Temporary Add-on…** and choose `extension/manifest.json`.
+The local API needs `fastapi` and `uvicorn` (both are in `requirements.txt`).
+Without them the app still starts; only browser tracking is switched off and
+a warning is written to the log.
 
-Temporary add-ons are removed when Firefox closes.
+## Install the extension
+
+1. Start Advanced App Tracker and open the **Браузер** tab.
+2. Click **Установить расширение в Firefox**.
+3. Firefox opens and asks "Add Advanced App Tracker?". Click **Add**.
+
+That's all: the extension is signed by Mozilla, so it stays installed after
+Firefox restarts. You can also drag `signed-extension/advanced-app-tracker.xpi`
+into a Firefox window yourself.
+
+### For developers
+
+- While changing the extension, load it without signing: open
+  `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…** →
+  `extension/manifest.json` (removed when Firefox closes), or run
+  `web-ext run` inside `extension/` to get auto-reload.
+- After a change, raise `"version"` in `extension/manifest.json` and sign a
+  new file (keys from https://addons.mozilla.org/developers/addon/api/key/):
+
+  ```powershell
+  npm install --global web-ext
+  $env:WEB_EXT_API_KEY = "user:12345:678"
+  $env:WEB_EXT_API_SECRET = "your-secret"
+  python tools/sign_extension.py
+  ```
+
+  The script writes `signed-extension/advanced-app-tracker.xpi`; commit it.
+  The extension is signed as *unlisted*: it is not shown in the add-ons
+  catalogue.
+
+Click the extension icon to see whether the app is running and which site is
+being recorded right now.
 
 ## Privacy
 
 - The API binds to `127.0.0.1` only; nothing is sent to the internet.
 - Query strings and fragments are never stored (they often contain tokens).
 - Private windows are not tracked.
-- Tracking can be turned off with the `browser_tracking_enabled` setting.
+- Time when you are away is not counted: after 60 seconds without mouse or
+  keyboard input (or when the screen is locked) the session stops. A tab that
+  is playing sound (a video lecture) keeps counting.
+- Tracking can be turned off in the **Браузер** tab (setting
+  `browser_tracking_enabled`).
 - Domains listed in `browser_ignored_domains` (comma separated, subdomains
   included) are not recorded.
+
+## Report in the app
+
+The **Браузер** tab shows the time per category and per site for today, the
+last 7 days or the last 30 days. It refreshes every 30 seconds. At the bottom
+you can switch recording on or off and edit the list of ignored sites; both
+take effect immediately, no restart needed.
 
 ## Settings (table `settings`)
 
@@ -53,7 +95,15 @@ and `host_permissions` in `extension/manifest.json`.
 | `POST /browser-event/update-title` | the tab title changed |
 | `POST /browser-event/stop` | the session ended |
 
+## Reliability
+
+Once a minute the extension re-sends `start` for the open session. The app
+ignores a session it already knows, so this is safe. If the app was restarted
+in the middle of a session, the session is restored with its original start
+time instead of being lost.
+
 ## Known limitations
 
-- Idle time (you walked away with the tab open) is not subtracted yet.
 - Only Firefox is supported by the bundled extension.
+- A silent video watched without touching the mouse stops counting after
+  60 seconds.

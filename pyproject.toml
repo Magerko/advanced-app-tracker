@@ -18,8 +18,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-full = ["pynput>=1.7", "bcrypt>=4.0", "pygetwindow>=0.0.9"]
-dev = ["pytest>=7.0", "ruff>=0.5"]
+browser = ["fastapi>=0.110", "uvicorn>=0.29"]
+full = [
+    "pynput>=1.7", "bcrypt>=4.0", "pygetwindow>=0.0.9",
+    "fastapi>=0.110", "uvicorn>=0.29",
+]
+dev = ["pytest>=7.0", "ruff>=0.5", "httpx>=0.27"]
 
 [project.scripts]
 app-tracker = "app_tracker.__main__:main"
@@ -27,6 +31,7 @@ app-tracker = "app_tracker.__main__:main"
 [tool.setuptools]
 packages = [
     "app_tracker",
+    "app_tracker.browser",
     "app_tracker.core",
     "app_tracker.platform_support",
     "app_tracker.security",

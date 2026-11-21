@@ -5,10 +5,8 @@ from __future__ import annotations
 import logging
 import sys
 
-from PyQt6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon, QTabWidget
+from PyQt6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
 
-from app_tracker.browser.api import BrowserApiServer
-from app_tracker.ui.browser_report_widget import BrowserReportWidget
 from app_tracker.browser.storage import BrowserStorage
 from app_tracker.config import (
     APP_NAME,
@@ -52,26 +50,7 @@ def run() -> int:
         QMessageBox.critical(None, APP_NAME, f"Ошибка запуска интерфейса:\n{exc}")
         db.close()
         return 1
-    try:
-        tab_bar = window.findChild(QTabWidget)
-        if tab_bar is not None:
-            tab_bar.addTab(BrowserReportWidget(db), "Браузер")
-    except Exception:
-        log.exception("Could not add the browser tab")
-
-    # Optional browser-tab tracking: a local API that the browser extension
-    # talks to. A busy port or a missing library must never stop the app.
-    try:
-        browser_storage = BrowserStorage(db)
-        if browser_storage.is_enabled():
-            browser_api = BrowserApiServer(
-                browser_storage,
-                db.get_int(SETTING_BROWSER_PORT, DEFAULT_BROWSER_API_PORT),
-            )
-            browser_api.start()
-            app.aboutToQuit.connect(browser_api.stop)
-    except Exception:
-        log.exception("Browser tracking could not start")
+    _start_browser_api(app, db)
 
     tray_available = QSystemTrayIcon.isSystemTrayAvailable()
     if db.get_bool(SETTING_START_MINIMIZED) and tray_available:
@@ -80,6 +59,32 @@ def run() -> int:
         window.show()
 
     return app.exec()
+
+
+def _start_browser_api(app: QApplication, db: DatabaseManager) -> None:
+    """Start the local API that the browser extension talks to.
+
+    The server always runs (if fastapi is installed): the "record sites"
+    switch is checked on every event, so it can be toggled without a restart.
+    A busy port or a missing library must never stop the app.
+    """
+    try:
+        from app_tracker.browser.api import BrowserApiServer
+    except ImportError:
+        log.warning(
+            "Browser tracking is off: install fastapi and uvicorn "
+            "(pip install -r requirements.txt)."
+        )
+        return
+    try:
+        server = BrowserApiServer(
+            BrowserStorage(db),
+            db.get_int(SETTING_BROWSER_PORT, DEFAULT_BROWSER_API_PORT),
+        )
+        server.start()
+        app.aboutToQuit.connect(server.stop)
+    except Exception:
+        log.exception("Browser tracking could not start")
 
 
 def main() -> None:

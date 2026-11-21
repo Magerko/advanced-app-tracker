@@ -10,5 +10,6 @@ pynput>=1.7        # idle detection (mouse/keyboard activity)
 bcrypt>=4.0        # strong hashing for the exit password
 pygetwindow>=0.0.9 # cross-platform active-window fallback
 
-fastapi
-uvicorn
+# Browser tab tracking (local API for the Firefox extension):
+fastapi>=0.110
+uvicorn>=0.29

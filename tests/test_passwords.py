@@ -1,7 +1,10 @@
+import pytest
+
 from app_tracker.security import passwords
 from app_tracker.security.passwords import check_password, hash_password
 
 
+@pytest.mark.skipif(not passwords._BCRYPT_AVAILABLE, reason="bcrypt is not installed")
 def test_bcrypt_roundtrip():
     h = hash_password("correct horse")
     assert h.startswith(b"$2")  # bcrypt marker
