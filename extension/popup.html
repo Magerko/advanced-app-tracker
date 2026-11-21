@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body {
+        width: 260px;
+        margin: 0;
+        padding: 12px;
+        font: 13px system-ui, sans-serif;
+      }
+      h1 {
+        font-size: 14px;
+        margin: 0 0 8px;
+      }
+      .status {
+        font-weight: bold;
+      }
+      .ok {
+        color: #1a7f37;
+      }
+      .bad {
+        color: #cf222e;
+      }
+      .site {
+        margin-top: 8px;
+        color: #555;
+        word-break: break-all;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Advanced App Tracker</h1>
+    <div id="status" class="status">Проверяю…</div>
+    <div id="site" class="site"></div>
+    <script src="popup.js"></script>
+  </body>
+</html>

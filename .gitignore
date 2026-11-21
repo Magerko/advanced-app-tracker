@@ -29,3 +29,6 @@ Thumbs.db
 
 # Backup created during the refactor
 _original_backup/
+
+# web-ext temporary output (the signed file goes to signed-extension/)
+web-ext-artifacts/

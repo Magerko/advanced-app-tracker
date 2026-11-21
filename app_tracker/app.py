@@ -7,7 +7,14 @@ import sys
 
 from PyQt6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
 
-from app_tracker.config import APP_NAME, ORG_NAME, SETTING_START_MINIMIZED
+from app_tracker.browser.storage import BrowserStorage
+from app_tracker.config import (
+    APP_NAME,
+    DEFAULT_BROWSER_API_PORT,
+    ORG_NAME,
+    SETTING_BROWSER_PORT,
+    SETTING_START_MINIMIZED,
+)
 from app_tracker.core.database import DatabaseManager
 from app_tracker.logging_setup import configure_logging
 from app_tracker.ui.main_window import MainWindow
@@ -43,6 +50,7 @@ def run() -> int:
         QMessageBox.critical(None, APP_NAME, f"Ошибка запуска интерфейса:\n{exc}")
         db.close()
         return 1
+    _start_browser_api(app, db)
 
     tray_available = QSystemTrayIcon.isSystemTrayAvailable()
     if db.get_bool(SETTING_START_MINIMIZED) and tray_available:
@@ -51,6 +59,32 @@ def run() -> int:
         window.show()
 
     return app.exec()
+
+
+def _start_browser_api(app: QApplication, db: DatabaseManager) -> None:
+    """Start the local API that the browser extension talks to.
+
+    The server always runs (if fastapi is installed): the "record sites"
+    switch is checked on every event, so it can be toggled without a restart.
+    A busy port or a missing library must never stop the app.
+    """
+    try:
+        from app_tracker.browser.api import BrowserApiServer
+    except ImportError:
+        log.warning(
+            "Browser tracking is off: install fastapi and uvicorn "
+            "(pip install -r requirements.txt)."
+        )
+        return
+    try:
+        server = BrowserApiServer(
+            BrowserStorage(db),
+            db.get_int(SETTING_BROWSER_PORT, DEFAULT_BROWSER_API_PORT),
+        )
+        server.start()
+        app.aboutToQuit.connect(server.stop)
+    except Exception:
+        log.exception("Browser tracking could not start")
 
 
 def main() -> None:
